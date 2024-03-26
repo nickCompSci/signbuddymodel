@@ -1,71 +1,101 @@
-
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import numpy as np
-from pydantic import BaseModel
-from fastapi.responses import JSONResponse
 import base64
-import cv2
-from ultralytics import YOLO
+import os
+import uuid
+
 import numpy as np
-import time
+import cv2
+from dotenv import load_dotenv
+from jose import jwt
+from ultralytics import YOLO
+from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status,  Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+from models import ImageResponseData, ImageRequestData
 
 app = FastAPI()
+load_dotenv()
 
-# Load the YOLOv8 ONNX model
-# onnx_model_path = "./models/best.onnx"
-# ort_session = onnxruntime.InferenceSession(onnx_model_path)
+MODEL_AUTH0_AUDIENCE= os.getenv("MODEL_AUTH0_AUDIENCE")
+MODEL_AUTH0_ISSUER= os.getenv("MODEL_AUTH0_ISSUER")
+MODEL_AUTH0_KEY= os.getenv("MODEL_AUTH0_KEY")
+MODEL_AUTH0_ALOGIRTHMS= os.getenv("MODEL_AUTH0_ALOGIRTHMS")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS")
+
+ALPHABET_MAPPING_DICT = {
+    'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4,
+    'F': 5, 'G': 6, 'H': 7, 'I': 8, 'J': 9,
+    'K': 10, 'L': 11, 'M': 12, 'N': 13, 'O': 14,
+    'P': 15, 'Q': 16, 'R': 17, 'S': 18, 'T': 19,
+    'U': 20, 'V': 21, 'W': 22, 'X': 23, 'Y': 24, 'Z': 25
+}
 
 origins = [
-    "http://localhost:5173",
+    ALLOWED_ORIGINS,
 ]
-alphabet = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    # allow_credentials=True,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-class ImageData(BaseModel):
-    image: str
-    letter: str
+model = YOLO('./detection-models/best.pt') 
 
-# Load YOLOv8 model
-model_path = "./models/best.pt"
-model = YOLO('./models/best.pt')  # load a custom trained model
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-@app.post("/verifyimage")
-async def process_image(image_data: ImageData):
-  start_time = time.time()
+@app.middleware("http")
+async def ValidateJwt(request: Request, call_next):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={'WWW-Authenticate': "Bearer"},
+    )
+    authorization_header = request.headers.get("Authorization")
+
+    if not authorization_header:
+        raise credentials_exception
+    bearer_token = authorization_header.split("Bearer ")[1]
+    try:
+        jwt.decode(token=bearer_token, audience=MODEL_AUTH0_AUDIENCE, issuer=MODEL_AUTH0_ISSUER, key=MODEL_AUTH0_KEY, algorithms=[MODEL_AUTH0_ALOGIRTHMS])
+        response = await call_next(request)
+        return response
+    except Exception:
+        raise credentials_exception
+   
+
+@app.post("/inference", response_model=ImageResponseData)
+async def process_image(image_data: ImageRequestData):
+
+  letter_to_detect = [ALPHABET_MAPPING_DICT[image_data.letter]]
+  # remove details about image from string 
   base64_data = image_data.image.split(',')[1]
 
-# Decode base64 and load image
+  # Decode base64 and load image
   decoded_image = base64.b64decode(base64_data)
 
-  with open("./images/imageToSave.jpg", "wb") as fh:
-      fh.write(decoded_image)
+  image_np = np.frombuffer(decoded_image, dtype=np.uint8)
+  image = cv2.imdecode(image_np, flags=cv2.IMREAD_COLOR)
 
-  image = cv2.imread('./images/imageToSave.jpg')
-  image = image.astype(np.uint8)
-
-  results = model.predict(image, max_det=1, conf=0.65, imgsz=512)
+  results = model.predict(image, device="cpu", max_det=1, conf=0.55, imgsz=512, classes=letter_to_detect )
   names = model.names
-  # print(names)
+
   predicted_class = ""
-  speeds = {}
+
+  predictions = []
   for r in results:
-      # print(r)
       boxes = r.boxes
-      labels = r.names  #pp Get class labels
-      speeds = r.speed
-      # print(labels)
+      labels = r.names  
       for c in r.boxes.cls:
           predicted_class = names[int(c)]
+          predictions.append(predicted_class)
 
       for box, label in zip(boxes, labels):
-          # print(label)
           # Extract box coordinates
           x, y, w, h = box.xyxy[0].int().tolist()
 
@@ -73,16 +103,18 @@ async def process_image(image_data: ImageData):
           cv2.rectangle(image, (x, y), (w, h), (0, 255, 0), 2)
 
           # Display class label
-          # print(label)
-          label_str = str(labels[label])
           cv2.putText(image, predicted_class, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-  cv2.imshow('Image with Bounding Boxes and Class Labels', image)
-  output_path = './images/predicted.jpg'  # Provide the desired path
+  imageKey = uuid.uuid4()
+  output_path = f'./images/{imageKey}.jpg'  # Provide the desired path
   cv2.imwrite(output_path, image)
-  end_time = time.time()
+  saved_image = cv2.imread(output_path)
+  _, encoded_image = cv2.imencode(".jpg", saved_image)
+  base64_encoded_image = base64.b64encode(encoded_image).decode("utf-8")
+  os.remove(output_path)
+  responseData = ImageResponseData()
+  if len(predictions) == 1 and predictions[0] == image_data.letter.upper():
+      responseData.image = base64_encoded_image
+      responseData.letterResult = 1
 
-  # Calculate the elapsed time
-  elapsed_time = end_time - start_time
-  print(f"Object detection took {elapsed_time:.4f} seconds")
+  return responseData
 
-  return f"Model predicted class: {predicted_class} with speeds: {speeds}"
