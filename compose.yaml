@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  signbuddymodelapi:
+    image: signbuddymodelapi
+    secrets:
+      - MODEL_AUTH0_AUDIENCE
+      - MODEL_AUTH0_ISSUER
+      - MODEL_AUTH0_KEY
+      - MODEL_AUTH0_ALOGIRTHMS
+      - ALLOWED_ORIGINS
+
+secrets:
+  MODEL_AUTH0_AUDIENCE:
+    file: .secrets/MODEL_AUTH0_AUDIENCE.txt
+  MODEL_AUTH0_ISSUER:
+    file: .secrets/MODEL_AUTH0_ISSUER.txt
+  MODEL_AUTH0_KEY:
+    file: .secrets/MODEL_AUTH0_KEY.txt
+  MODEL_AUTH0_ALOGIRTHMS:
+    file: .secrets/MODEL_AUTH0_ALOGIRTHMS.txt
+  ALLOWED_ORIGINS:
+    file: .secrets/ALLOWED_ORIGINS.txt

@@ -1,0 +1,15 @@
+.env
+.env.example
+.gitignore
+README.md
+exec.sh
+exec.ps1
+Procfile
+venv
+__pycache__
+*__pycache__
+secrets*
+secrets
+.secrets*
+.secrets
+compose.yaml
