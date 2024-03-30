@@ -37,7 +37,7 @@ ALPHABET_MAPPING_DICT = {
 }
 
 origins = [
-    "*"
+    fetchSecrets("ALLOWED_ORIGINS")
 ]
 
 app.add_middleware(
@@ -119,6 +119,9 @@ async def process_image(image_data: ImageRequestData):
   if len(predictions) == 1 and predictions[0] == image_data.letter.upper():
       responseData.image = base64_encoded_image
       responseData.letterResult = 1
-
+      return responseData
+  else:
+      responseData.image = base64_encoded_image
+      responseData.letterResult = -1
   return responseData
 
