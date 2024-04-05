@@ -6,16 +6,16 @@ import numpy as np
 import cv2
 from dotenv import load_dotenv
 from jose import jwt
+
+from typing import Annotated
 from ultralytics import YOLO
-from fastapi import FastAPI, HTTPException
-from fastapi import FastAPI, HTTPException, status,  Request
+from fastapi import FastAPI, HTTPException, Depends, status,  Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from .models import ImageResponseData, ImageRequestData
 from .security import fetchSecrets
-import importlib.resources
+
 
 app = FastAPI()
 load_dotenv()
@@ -53,30 +53,22 @@ yolo_model_path = os.path.join(module_path, 'best.pt')
 saved_image_dir = os.path.join(module_path, 'images')
 model = YOLO(yolo_model_path) 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+OAUTH2_SCHEME = OAuth2PasswordBearer(tokenUrl="token")
 
-@app.middleware("http")
-async def ValidateJwt(request: Request, call_next):
+async def ValidateJwt(token: Annotated[str, Depends(OAUTH2_SCHEME)]):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={'WWW-Authenticate': "Bearer"},
     )
-    authorization_header = request.headers.get("Authorization")
-
-    if not authorization_header:
-        raise credentials_exception
-    bearer_token = authorization_header.split("Bearer ")[1]
     try:
-        jwt.decode(token=bearer_token, audience=MODEL_AUTH0_AUDIENCE, issuer=MODEL_AUTH0_ISSUER, key=MODEL_AUTH0_KEY, algorithms=[MODEL_AUTH0_ALOGIRTHMS])
-        response = await call_next(request)
-        return response
+        payload = jwt.decode(token=token, audience=MODEL_AUTH0_AUDIENCE, issuer=MODEL_AUTH0_ISSUER, key=MODEL_AUTH0_KEY, algorithms=[MODEL_AUTH0_ALOGIRTHMS])
+        return payload
     except Exception:
         raise credentials_exception
-   
 
 @app.post("/inference", response_model=ImageResponseData)
-async def process_image(image_data: ImageRequestData):
+async def process_image(current_user: Annotated[object, Depends(ValidateJwt)], image_data: ImageRequestData):
   letter_to_detect = [ALPHABET_MAPPING_DICT[image_data.letter]]
   # remove details about image from string 
   base64_data = image_data.image.split(',')[1]
